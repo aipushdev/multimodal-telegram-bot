@@ -1,147 +1,126 @@
-# PsychoAI-C — Telegram-бот гештальт-терапевта
+# Multimodal Telegram Bot
 
-Экспериментальный бот для терапевтических сессий. Понимает текст и голос, генерирует метафорические карты.
-
-## Что умеет
-
-- **Диалог** — гештальт-терапевт отвечает открытыми вопросами, не даёт советов
-- **Голос** — голосовые сообщения распознаёт через Whisper и передаёт в LLM
-- **Метафорические карты** — `/generate_map` генерирует изображение через Gemini Imagen
-- **История** — хранит контекст диалога в PostgreSQL
-- **/show_all** — показывает все карты пользователя
-
-## Провайдеры
-
-Все провайдеры переключаются через `.env` без изменения кода.
-
-| Тип | Провайдер | Переменная |
-|-----|-----------|------------|
-| LLM | YandexGPT или Gemini | `LLM_PROVIDER=yandex\|gemini` |
-| Генерация изображений | Gemini Imagen 4 | `IMAGE_PROVIDER=gemini` |
-| Распознавание речи | Whisper (локальный) | `STT_PROVIDER=whisper` |
-
-## Стек
-
-- Python + pyTelegramBotAPI
-- PostgreSQL + pgvector
-- Whisper ASR (Docker)
-- Alembic (миграции)
-- uv (пакетный менеджер)
+> AI-powered Telegram bot for gestalt therapy sessions.  
+> Understands text, voice, and photos — all in a single conversation thread.
 
 ---
 
-## Локальный запуск
+## What it does
 
-### 1. Требования
+A therapist or client opens Telegram and starts a session. They can type a message, send a voice note, or share a photo — the bot handles all three natively, maintains full session context, and responds as a gestalt-aware AI companion.
 
-- Docker + Docker Compose
-- uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-
-### 2. Настройка
-
-```bash
-cp .env.example .env
-```
-
-Заполни `.env`:
-```
-BOT_TOKEN=токен_от_BotFather
-GEMINI_API_KEY=ключ_от_Google_AI_Studio
-LLM_PROVIDER=gemini
-WHISPER_MODEL=medium   # tiny | base | small | medium | large-v3
-```
-
-### 3. Запуск
-
-```bash
-docker compose up -d db whisper   # поднять БД и Whisper
-uv sync                            # установить зависимости
-uv run python migrate.py           # накатить миграции
-uv run python bot.py               # запустить бота
-```
-
-> Whisper скачает модель при первом старте. `medium` — 1.5 GB, `large-v3` — 2.9 GB.
-
-### Модели Whisper
-
-| Модель | Размер | Скорость (CPU) | Качество RU |
-|--------|--------|----------------|-------------|
-| small | 466 MB | быстро | приемлемо |
-| medium | 1.5 GB | ~25 мин / 50 мин аудио | хорошо |
-| large-v3 | 2.9 GB | ~1 час / 50 мин аудио | отлично |
+Three session modes: **therapy session**, **reflective diary**, and **metaphorical card work**.
 
 ---
 
-## Запуск на VPS
+## Architecture
 
-### 1. Установка Docker
-
-```bash
-apt update && apt install -y docker.io docker-compose-plugin
+```
+Telegram
+   │
+   ├── text message  ──► Gemini Flash (LLM)
+   │
+   ├── voice message ──► Whisper STT ──► Gemini Flash (LLM)
+   │
+   └── photo         ──► Gemini Vision ──► Gemini Flash (LLM)
+                                │
+                         session context
+                         (DB + past reports)
+                                │
+                           Response
 ```
 
-### 2. Клонирование и настройка
+Each modality goes through the same session context layer — the bot knows who the user is, what session type is active, and what was discussed in previous sessions.
+
+---
+
+## Key features
+
+- **True multimodality** — voice, photo, and text handled in one unified session
+- **Session lifecycle** — explicit start/end, session type selection (`/session`, `/diary`, `/card`)
+- **Context continuity** — past session reports are injected into every new session prompt
+- **Pluggable providers** — Whisper (OpenAI) or Yandex for STT; Gemini for LLM and Vision
+- **Structured prompt system** — separate system prompts per session type (therapist, diary, card)
+- **PostgreSQL + Alembic** — full session and message history with versioned migrations
+- **Session scheduler** — automated session reminders and lifecycle management
+- **Fully containerized** — one `docker compose up` to run everything
+
+---
+
+## Session types
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| Therapy session | `/session` | Full gestalt therapy dialogue with therapist-mode prompts |
+| Reflective diary | `/diary` | Daily emotional reflection and journaling |
+| Metaphorical card | `/card` | Image-based projection and metaphor work |
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| LLM | Gemini 2.0 Flash |
+| Vision | Gemini Vision |
+| STT | OpenAI Whisper |
+| Bot framework | pyTelegramBotAPI |
+| Database | PostgreSQL |
+| Migrations | Alembic |
+| Infra | Docker, Docker Compose |
+| Package manager | uv |
+
+---
+
+## Project structure
+
+```
+handlers/
+├── voice.py          # Voice → STT → LLM
+├── photo.py          # Photo → Vision → LLM
+├── text_handler.py   # Text → LLM
+├── session.py        # Session start/end logic
+└── report.py         # Session report generation
+
+providers/
+├── whisper.py        # OpenAI Whisper STT
+├── gemini_llm.py     # Gemini text generation
+├── gemini.py         # Gemini Vision
+└── yandex.py         # Yandex STT (alternative)
+
+prompts/
+├── therapist.py      # Gestalt therapy session prompt
+├── diary.py          # Reflective diary prompt
+├── card_session.py   # Metaphorical card prompt
+├── period_report.py  # Session summary prompt
+└── session_report.py # End-of-session report prompt
+
+session_lifecycle.py  # Context building across sessions
+scheduler.py          # Automated session reminders
+```
+
+---
+
+## Quick start
 
 ```bash
-git clone https://github.com/ivproduction/pe-06-homework-demo.git
-cd pe-06-homework-demo
+git clone https://github.com/aipushdev/multimodal-telegram-bot
+cd multimodal-telegram-bot
+
 cp .env.example .env
-nano .env
-```
+# Fill in: TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, OPENAI_API_KEY, DATABASE_URL
 
-Добавь в `.env`:
-```
-MODE=webhook
-WEBHOOK_URL=https://твой-домен.com
-BOT_TOKEN=...
-GEMINI_API_KEY=...
-```
-
-### 3. Настройка домена и SSL (Nginx + Certbot)
-
-```bash
-apt install -y nginx certbot python3-certbot-nginx
-```
-
-Конфиг `/etc/nginx/sites-available/bot`:
-```nginx
-server {
-    listen 80;
-    server_name твой-домен.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8443;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-```bash
-ln -s /etc/nginx/sites-available/bot /etc/nginx/sites-enabled/
-certbot --nginx -d твой-домен.com
-nginx -s reload
-```
-
-### 4. Запуск
-
-```bash
 docker compose up -d
-```
-
-Миграции накатятся автоматически при старте контейнера.
-
-### 5. Обновление кода
-
-```bash
-git pull
-docker compose up -d --build app
+docker compose exec bot python migrate.py
 ```
 
 ---
 
-## Ключи
+## Background
 
-- **BOT_TOKEN** — [@BotFather](https://t.me/BotFather)
-- **GEMINI_API_KEY** — [aistudio.google.com](https://aistudio.google.com) → Get API key
-- **YANDEX_API_KEY / YANDEX_FOLDER_ID** — [console.yandex.cloud](https://console.yandex.cloud) → Сервисные аккаунты
+Built as the client-facing component of the PsychoAI platform.  
+The bot serves as a daily emotional companion between therapy sessions — helping clients reflect, process, and track their inner work through whatever input feels natural in the moment.
+
+---
+
+*Author: [Alexander Kirilov](https://www.linkedin.com/in/kirilovu/) · [aipush.dev](https://aipush.dev)*
