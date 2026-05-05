@@ -1,126 +1,147 @@
-# Multimodal AI Telegram Bot
+# PsychoAI-C — Telegram-бот гештальт-терапевта
 
-> Telegram bot that understands text, voice, and photos — and speaks back as an AI assistant. Built for a gestalt therapy use case, but the architecture works for any domain.
+Экспериментальный бот для терапевтических сессий. Понимает текст и голос, генерирует метафорические карты.
 
----
+## Что умеет
 
-## What it does
+- **Диалог** — гештальт-терапевт отвечает открытыми вопросами, не даёт советов
+- **Голос** — голосовые сообщения распознаёт через Whisper и передаёт в LLM
+- **Метафорические карты** — `/generate_map` генерирует изображение через Gemini Imagen
+- **История** — хранит контекст диалога в PostgreSQL
+- **/show_all** — показывает все карты пользователя
 
-Clients interact however is natural for them:
+## Провайдеры
 
-| Input | How it works |
-|-------|-------------|
-| **Text** | Direct to LLM |
-| **Voice message** | Whisper STT transcription -> LLM |
-| **Photo** (handwritten notes, diary pages) | Gemini Vision OCR -> LLM |
-| **/card command** | LLM generates image prompt -> Gemini Imagen 4 |
+Все провайдеры переключаются через `.env` без изменения кода.
 
-All modalities feed into a **single conversation history** — the assistant remembers context across message types within a session.
+| Тип | Провайдер | Переменная |
+|-----|-----------|------------|
+| LLM | YandexGPT или Gemini | `LLM_PROVIDER=yandex\|gemini` |
+| Генерация изображений | Gemini Imagen 4 | `IMAGE_PROVIDER=gemini` |
+| Распознавание речи | Whisper (локальный) | `STT_PROVIDER=whisper` |
 
----
+## Стек
 
-## Architecture
-
-```
-Telegram User
-      |
-      +-- text  --------------------+
-      |                             |
-      +-- voice (ogg) -> Whisper -> +-> Session History -> Google Gemini -> Response
-      |                             |
-      +-- photo -> Gemini Vision -> +
-      |
-      +-- /card -> LLM prompt -> Gemini Imagen 4 -> Image
-```
-
-**Key design decision:** all modalities are normalized to text before reaching the LLM. This keeps the core logic simple and makes the system easy to extend with new input types.
+- Python + pyTelegramBotAPI
+- PostgreSQL + pgvector
+- Whisper ASR (Docker)
+- Alembic (миграции)
+- uv (пакетный менеджер)
 
 ---
 
-## Stack
+## Локальный запуск
 
-- **Python 3.11** - core
-- **python-telegram-bot** - Telegram integration
-- **Whisper** (self-hosted) - Speech-to-Text for voice messages
-- **Google Gemini** (`gemini-2.0-flash`) - LLM + Vision
-- **Gemini Imagen 4 Fast** - image generation
-- **PostgreSQL** - conversation history persistence
-- **Docker Compose** - all services: bot + whisper + db
+### 1. Требования
 
----
+- Docker + Docker Compose
+- uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
-## Key Implementation Notes
-
-**Voice processing:**
-```python
-# ogg -> wav -> Whisper transcription
-audio = await bot.get_file(message.voice.file_id)
-transcript = whisper_client.transcribe(audio_bytes)
-```
-
-**Photo processing (Gemini Vision):**
-```python
-prompt = """Read and transcribe all text from this image exactly as written.
-If handwritten - transcribe as accurately as possible.
-Return only the text, no commentary."""
-```
-
-**Polling fix for callback queries:**
-```python
-# Required for inline keyboard callbacks to work
-bot.infinity_polling(allowed_updates=["message", "callback_query"])
-```
-
----
-
-## Setup
+### 2. Настройка
 
 ```bash
-git clone https://github.com/aipushdev/multimodal-telegram-bot
-cd multimodal-telegram-bot
-
 cp .env.example .env
-# TELEGRAM_TOKEN, GEMINI_API_KEY, POSTGRES_URL
-
-docker-compose up -d
 ```
 
-Services started:
-- `app` - Python Telegram bot
-- `whisper` - self-hosted STT server
-- `db` - PostgreSQL
+Заполни `.env`:
+```
+BOT_TOKEN=токен_от_BotFather
+GEMINI_API_KEY=ключ_от_Google_AI_Studio
+LLM_PROVIDER=gemini
+WHISPER_MODEL=medium   # tiny | base | small | medium | large-v3
+```
+
+### 3. Запуск
+
+```bash
+docker compose up -d db whisper   # поднять БД и Whisper
+uv sync                            # установить зависимости
+uv run python migrate.py           # накатить миграции
+uv run python bot.py               # запустить бота
+```
+
+> Whisper скачает модель при первом старте. `medium` — 1.5 GB, `large-v3` — 2.9 GB.
+
+### Модели Whisper
+
+| Модель | Размер | Скорость (CPU) | Качество RU |
+|--------|--------|----------------|-------------|
+| small | 466 MB | быстро | приемлемо |
+| medium | 1.5 GB | ~25 мин / 50 мин аудио | хорошо |
+| large-v3 | 2.9 GB | ~1 час / 50 мин аудио | отлично |
 
 ---
 
-## Project Structure
+## Запуск на VPS
 
+### 1. Установка Docker
+
+```bash
+apt update && apt install -y docker.io docker-compose-plugin
 ```
-.
-- bot.py                    # entry point, handler registration
-- handlers/
-  - text.py                 # text message handler
-  - voice.py                # voice -> Whisper -> text
-  - photo.py                # photo -> Gemini Vision -> text
-  - commands.py             # /start, /clear, /card, /report
-- providers/
-  - gemini_llm.py           # LLM generation
-  - gemini_vision.py        # Vision OCR
-  - whisper_client.py       # STT client
-  - imagen.py               # image generation
-- db/
-  - session.py              # conversation history
-- docker-compose.yml
+
+### 2. Клонирование и настройка
+
+```bash
+git clone https://github.com/ivproduction/pe-06-homework-demo.git
+cd pe-06-homework-demo
+cp .env.example .env
+nano .env
+```
+
+Добавь в `.env`:
+```
+MODE=webhook
+WEBHOOK_URL=https://твой-домен.com
+BOT_TOKEN=...
+GEMINI_API_KEY=...
+```
+
+### 3. Настройка домена и SSL (Nginx + Certbot)
+
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+```
+
+Конфиг `/etc/nginx/sites-available/bot`:
+```nginx
+server {
+    listen 80;
+    server_name твой-домен.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8443;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+```bash
+ln -s /etc/nginx/sites-available/bot /etc/nginx/sites-enabled/
+certbot --nginx -d твой-домен.com
+nginx -s reload
+```
+
+### 4. Запуск
+
+```bash
+docker compose up -d
+```
+
+Миграции накатятся автоматически при старте контейнера.
+
+### 5. Обновление кода
+
+```bash
+git pull
+docker compose up -d --build app
 ```
 
 ---
 
-## Results
+## Ключи
 
-- Voice handler built in ~30 min with AI-assisted coding (vs 2-3 hours manually)
-- All 3 input modalities working in unified conversation flow
-- Image generation on `/card` command with LLM-enhanced prompts
-- Deployed via Docker Compose, polling mode
-
----
-
-_Built during Module 4 of AI Engineering course. Domain: gestalt therapy assistant._
+- **BOT_TOKEN** — [@BotFather](https://t.me/BotFather)
+- **GEMINI_API_KEY** — [aistudio.google.com](https://aistudio.google.com) → Get API key
+- **YANDEX_API_KEY / YANDEX_FOLDER_ID** — [console.yandex.cloud](https://console.yandex.cloud) → Сервисные аккаунты

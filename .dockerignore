@@ -1,0 +1,9 @@
+.env
+.git
+.venv
+.gitignore
+__pycache__
+*.py[oc]
+*.md
+images/
+test_phrases.txt
